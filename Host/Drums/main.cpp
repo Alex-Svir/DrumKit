@@ -8,7 +8,7 @@
 
 void gcallback_window_close(GtkWidget*, gpointer);
 void gcallback_button_rec(GtkWidget*, gpointer);
-void set_button_recording_state(gpointer);
+void notify_session_started(gpointer ptr);
 
 Session ses;
 
@@ -18,7 +18,6 @@ int main(int argc, char* argv[])
 
     GtkWidget *window;
     GtkWidget *form, *frame, *box;
-    GtkWidget *button_rec;
 
     gtk_init(&argc, &argv);
 
@@ -34,49 +33,39 @@ int main(int argc, char* argv[])
     gtk_container_add(GTK_CONTAINER(window), form);
 
     //  Panels' content
-    ChoisePanel cp;
-    TopPanel tp;
-    BottomPanel bp;
+    ChoisePanel center;
+    TopPanel top;
+    BottomPanel bottom;
 
     //  Session parameters
     struct params prms;
-    prms.cp = &cp;
-    prms.tp = &tp;
-    prms.bp = &bp;
+    prms.center = &center;
+    prms.top = &top;
+    prms.bottom = &bottom;
 
     //  Top frame
     frame = gtk_frame_new(NULL);
     gtk_box_pack_start(GTK_BOX(form), frame, FALSE, FALSE, 0);
 
     //  Top panel
-    box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_container_set_border_width(GTK_CONTAINER(box), 2);
-    gtk_container_add(GTK_CONTAINER(frame), box);
-
-    button_rec = gtk_button_new_with_label("REC");
-    g_signal_connect(G_OBJECT(button_rec), "clicked", G_CALLBACK(gcallback_button_rec), &prms);
-    gtk_box_pack_start(GTK_BOX(box), button_rec, FALSE, FALSE, 2);
-
-    gtk_box_pack_end(GTK_BOX(box), tp.get_pointer(), FALSE, TRUE, 5);
+    gtk_container_add(GTK_CONTAINER(frame), top.get_pointer());
+    g_signal_connect(G_OBJECT(top.get_rec_button()), "clicked", G_CALLBACK(gcallback_button_rec), &prms);
 
     //  Central area
     box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_pack_start(GTK_BOX(form), box, TRUE, TRUE, 0);
-    gtk_box_pack_end(GTK_BOX(box), cp.get_pointer(), FALSE, TRUE, 5);
+    gtk_box_pack_end(GTK_BOX(box), center.get_pointer(), FALSE, TRUE, 5);
 
     //  Bottom frame
     frame = gtk_frame_new(NULL);
     gtk_box_pack_end(GTK_BOX(form), frame, FALSE, FALSE, 0);
 
     //  Bottom panel
-    box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_container_set_border_width(GTK_CONTAINER(box), 2);
-    gtk_container_add(GTK_CONTAINER(frame), box);
-    gtk_box_pack_end(GTK_BOX(box), bp.get_pointer(), TRUE, TRUE, 0);
+    gtk_container_add(GTK_CONTAINER(frame), bottom.get_pointer());
 
     //  Other parameters
-    prms.func = &set_button_recording_state;
-    prms.arg = (gpointer) button_rec;
+    prms.func = &notify_session_started;
+    prms.arg = (gpointer) top.get_rec_button();
 
     //  Start
     gtk_widget_show_all(window);
@@ -105,22 +94,28 @@ void gcallback_window_close(GtkWidget *window, gpointer data)
 
 void gcallback_button_rec(GtkWidget *button, gpointer data)
 {
+    struct params *prms = (struct params*) data;
     if (ses.ready_for_stop())
     {
         ses.stop();
         gtk_button_set_label(GTK_BUTTON(button), "REC");
-        ((struct params *)data)->bp->drop_filename();
-        ((struct params *)data)->arg = (gpointer) button;
+        prms->bottom->drop_filename();
     }
     else if (ses.ready_for_start())
     {
-        std::thread th(threadfunc_record, (struct params *)data);
+        std::thread th(threadfunc_record, prms);
         th.detach();
     }
 }
 
-void set_button_recording_state(gpointer ptr)
+gboolean set_button_recording_state(gpointer ptr)
 {
     GtkWidget *button = (GtkWidget *)ptr;
     gtk_button_set_label(GTK_BUTTON(button), "STOP");
+    return FALSE;
+}
+
+void notify_session_started(gpointer ptr)
+{
+    g_main_context_invoke(NULL, set_button_recording_state, ptr);
 }
