@@ -26,10 +26,7 @@ class Channel {
 void make_buf(uint8_t code, uint8_t velocity, unsigned long moment, byte* buf) {
   buf[0] = (byte)code;
   buf[1] = (byte)velocity;
-  buf[2] = (byte) (moment >> 24);
-  buf[3] = (byte) (moment >> 16);
-  buf[4] = (byte) (moment >> 8);
-  buf[5] = (byte) moment;
+  *(unsigned long *)(buf+2) = moment;
 }
 
   void start(uint8_t value, unsigned long moment) {
