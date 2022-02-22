@@ -120,15 +120,7 @@ void Midi::add(uint8_t *buffer)
 
 uint32_t Midi::extract_moment(uint8_t* buf)
 {
-    uint32_t l = 0;
-    l |= buf[2];
-    l = l<<8;
-    l |= buf[3];
-    l = l<<8;
-    l |= buf[4];
-    l = l<<8;
-    l |= buf[5];
-    return l;
+    return *(uint32_t*)(buf+2);
 }
 
 uint32_t Midi::calc_abs_ticks(uint32_t delta_moment, int bpm, int ppqn)
@@ -146,7 +138,7 @@ int Midi::ticks_to_vlq(uint8_t* buf, uint32_t ticks)
         buf[4-count] = (uint8_t) ticks;
         buf[4-count] |= 0x80;
 
-        if ( !(ticks /= 128) )
+        if ( !(ticks >>= 7) )
         {
             break;
         }
