@@ -3,6 +3,7 @@
 BottomPanel::BottomPanel()
 {
     box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_container_set_border_width(GTK_CONTAINER(box), 2);
 
     port_button = gtk_button_new_with_label("SELECT PORT");
 

@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <thread>
 #include <fcntl.h>
+#include <gtk/gtk.h>
 #include "Midi.h"
 
 #define SEA 6

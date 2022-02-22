@@ -5,11 +5,11 @@
 #define TEMPO_MIN 30
 #define TIMESIGN_UPPER_MAX 128
 #define TIMESIGN_LOWER_MAX_AS_POWER_2 8
-#define DEFAULT_PPQN 768
 
 #include <gtk/gtk.h>
 #include <cstdio>
-#include <string>
+//#include "Options.h"
+#include "Session.h"
 
 class TimeSignaturePopover
 {
@@ -26,32 +26,29 @@ class TopPanel
 {
     GtkWidget *box;
     GtkWidget *button_rec;
-    GtkWidget *spin;
     GtkWidget *button_ppqn;
     GtkWidget *button_timesign;
+
     TimeSignaturePopover popover;
 
-    int ppqn = DEFAULT_PPQN;
-    int time_signature_upper = 4;
-    int time_signature_lower_as_power_2 = 2;
+    options *optns;
 
     void init_rec_button();
     void init_smf_type_block();
     void init_ppqn_block();
     void init_time_signature_block();
     void init_tempo_block();
-    const char* get_timesign_string();
 
     static void gcallback_show_menu(GtkWidget *button, gpointer data);
     static void gcallback_menu_item_selected(GtkWidget *item, gpointer data);
     static void gcallback_show_popover(GtkWidget *button, gpointer data);
     static void gcallback_popover_set(GtkWidget *button, gpointer data);
+
+    static void gcallback_tempo_changed(GtkSpinButton *spin_button, gpointer data);
 public:
-    TopPanel();
+    TopPanel(options *optns);
     GtkWidget* get_pointer();
     GtkWidget* get_rec_button();
-    int get_tempo();
-    int get_ppqn();
 };
 
 #endif

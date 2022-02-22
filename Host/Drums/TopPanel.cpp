@@ -1,7 +1,10 @@
 #include "TopPanel.h"
 
-TopPanel::TopPanel()
+/// Constructor
+TopPanel::TopPanel(options *optns)
 {
+    this->optns = optns;
+
     box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_container_set_border_width(GTK_CONTAINER(box), 2);
 
@@ -12,21 +15,16 @@ TopPanel::TopPanel()
     init_smf_type_block();
 }
 
+//! Returns root element
+/// \return pointer to the root element
 GtkWidget* TopPanel::get_pointer()
 {
     return box;
 }
 
-int TopPanel::get_tempo()
-{
-    return gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(spin));
-}
-
-int TopPanel::get_ppqn()
-{
-    return ppqn;
-}
-
+/*!
+    Returns RECORD button pointer
+*/
 GtkWidget* TopPanel::get_rec_button()
 {
     return button_rec;
@@ -47,11 +45,13 @@ void TopPanel::init_tempo_block()
     gtk_box_pack_end(GTK_BOX(box), elem, FALSE, FALSE, 5);
 
     //  Create a spin button
-    GtkAdjustment *adjustment = gtk_adjustment_new(120, TEMPO_MIN, TEMPO_MAX, 1, 10, 10);
-    spin = gtk_spin_button_new(adjustment, 0, 0);
-    gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(spin), GTK_UPDATE_IF_VALID);
-    gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(spin), TRUE);
-    gtk_box_pack_end(GTK_BOX(box), spin, FALSE, FALSE, 0);
+    GtkAdjustment *adjustment = gtk_adjustment_new(optns->tempo, TEMPO_MIN, TEMPO_MAX, 1, 10, 10);
+    elem = gtk_spin_button_new(adjustment, 0, 0);
+    gtk_spin_button_set_update_policy(GTK_SPIN_BUTTON(elem), GTK_UPDATE_IF_VALID);
+    gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(elem), TRUE);
+    gtk_box_pack_end(GTK_BOX(box), elem, FALSE, FALSE, 0);
+
+    g_signal_connect(G_OBJECT(elem), "value-changed", G_CALLBACK(gcallback_tempo_changed), optns);
 
     //  Pack a left label
     elem = gtk_label_new("Tempo:");
@@ -60,7 +60,8 @@ void TopPanel::init_tempo_block()
 
 void TopPanel::init_ppqn_block()
 {
-    std::string ppqn_values[] = {"96", "192", "384", "768", "1536", "3072", "6144", "12288", "24576"};
+    int ppqn_values[] = {96, 192, 384, 768, 1536, 3072, 6144, 12288, 24576};
+    char str[8];
 
     GtkWidget *elem;
 
@@ -68,14 +69,18 @@ void TopPanel::init_ppqn_block()
     elem = gtk_menu_new();
     for (int i=0; i<9; i++)
     {
-        GtkWidget *item = gtk_menu_item_new_with_label(ppqn_values[i].c_str());
+        sprintf(str, "%d", ppqn_values[i]);
+        GtkWidget *item = gtk_menu_item_new_with_label(str);
+
         gtk_menu_shell_append(GTK_MENU_SHELL(elem), item);
         gtk_widget_show(item);
         g_signal_connect(G_OBJECT(item), "activate", G_CALLBACK(gcallback_menu_item_selected), this);
     }
 
     //  Create a button showing menu and pack it
-    button_ppqn = gtk_button_new_with_label(std::to_string(ppqn).c_str());
+    sprintf(str, "%d", optns->ppqn);
+    button_ppqn = gtk_button_new_with_label(str);
+
     g_signal_connect(G_OBJECT(button_ppqn), "clicked", G_CALLBACK(gcallback_show_menu), elem);
     gtk_box_pack_end(GTK_BOX(box), button_ppqn, FALSE, FALSE, 5);
 
@@ -87,9 +92,11 @@ void TopPanel::init_ppqn_block()
 void TopPanel::init_time_signature_block()
 {
     //  Create a button calling popover
-    button_timesign = gtk_button_new_with_label( get_timesign_string() );
+    gchar *label = optns->get_timesign_string();
+    button_timesign = gtk_button_new_with_label(label);
+    g_free(label);
     popover.create(button_timesign, gcallback_popover_set, this);
-    popover.set_combos(time_signature_upper, time_signature_lower_as_power_2);
+    popover.set_combos(optns->time_signature_upper, optns->time_signature_lower_as_power_2);
     g_signal_connect(G_OBJECT(button_timesign), "clicked", G_CALLBACK(gcallback_show_popover), this);
 
     //  Add to main box
@@ -121,12 +128,6 @@ void TopPanel::init_smf_type_block()
     gtk_box_pack_end(GTK_BOX(box), out_box, FALSE, FALSE, 25);
 }
 
-const char* TopPanel::get_timesign_string()
-{
-    return ( std::to_string(time_signature_upper) + "/"
-                + std::to_string(1<<time_signature_lower_as_power_2) ).c_str();
-}
-
 void TopPanel::gcallback_show_menu(GtkWidget *button, gpointer data)
 {
     GtkWidget *menu = (GtkWidget *) data;
@@ -136,24 +137,30 @@ void TopPanel::gcallback_show_menu(GtkWidget *button, gpointer data)
 void TopPanel::gcallback_menu_item_selected(GtkWidget *item, gpointer data)
 {
     TopPanel *ptr = (TopPanel *)data;
-    std::string s_ppqn = gtk_menu_item_get_label(GTK_MENU_ITEM(item));
-    ptr->ppqn = stoi(s_ppqn);
-    gtk_button_set_label(GTK_BUTTON(ptr->button_ppqn), s_ppqn.c_str());
+    const gchar* c_ppqn = gtk_menu_item_get_label(GTK_MENU_ITEM(item));
+    ptr->optns->ppqn = atoi(c_ppqn);
+    gtk_button_set_label(GTK_BUTTON(ptr->button_ppqn), c_ppqn);
 }
-
 
 void TopPanel::gcallback_show_popover(GtkWidget *button, gpointer data)
 {
     gtk_popover_popup(GTK_POPOVER(((TopPanel*)data)->popover.get_pointer()));
 }
 
+void TopPanel::gcallback_tempo_changed(GtkSpinButton *spin_button, gpointer data)
+{
+    ((options*) data)->tempo = gtk_spin_button_get_value_as_int(spin_button);
+}
+
 void TopPanel::gcallback_popover_set(GtkWidget *button, gpointer data)
 {
     TopPanel *ptr = (TopPanel *)data;
-    ptr->time_signature_upper = ptr->popover.get_numerator();
-    ptr->time_signature_lower_as_power_2 = ptr->popover.get_denominator();
+    ptr->optns->time_signature_upper = ptr->popover.get_numerator();
+    ptr->optns->time_signature_lower_as_power_2 = ptr->popover.get_denominator();
     gtk_popover_popdown(GTK_POPOVER(ptr->popover.get_pointer()));
-    gtk_button_set_label( GTK_BUTTON(ptr->button_timesign), ptr->get_timesign_string() );
+    gchar *label = ptr->optns->get_timesign_string();
+    gtk_button_set_label( GTK_BUTTON(ptr->button_timesign), label);
+    g_free(label);
 }
 
 void TimeSignaturePopover::create(GtkWidget *base_button, void (*callback)(GtkWidget*, gpointer), gpointer argument)

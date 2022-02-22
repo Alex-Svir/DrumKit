@@ -20,6 +20,7 @@ class BottomPanel
     std::string get_file_name();
 public:
     BottomPanel();
+    /// Returns root element pointer
     GtkWidget* get_pointer();
     std::string get_port_name();
     std::string get_file_name_with_path();

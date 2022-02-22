@@ -37,7 +37,7 @@ void Session::rec()
     Midi midi;
     char buffer[6];
     int read_count;
-    std::ifstream ifs(prms->bp->get_port_name());
+    std::ifstream ifs(prms->bottom->get_port_name());
     //  dump
     do
     {
@@ -65,10 +65,10 @@ void Session::start(struct params *prms)
 {
     if (status != DISCONNECTED) return;
     status = CONNECTED;
-    int fd = open (prms->bp->get_port_name().c_str(), O_RDWR | O_NOCTTY);
+    int fd = open (prms->bottom->get_port_name().c_str(), O_RDWR | O_NOCTTY);
     if (fd == -1)
     {
-        std::cout << "\nError opening port \"" << prms->bp->get_port_name() << "\". It may be unplugged or busy\n\n";
+        std::cout << "\nError opening port \"" << prms->bottom->get_port_name() << "\". It may be unplugged or busy\n\n";
         status = DISCONNECTED;
         return;
     }

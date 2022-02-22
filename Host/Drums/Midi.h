@@ -6,18 +6,31 @@
 #define TEMPO_LEN 7
 #define TMP_FILE_NAME "tmp"
 
+#define DEFAULT_PPQN 768
+
 #include <fstream>
+#include <string>
+#include "Session.h"
 #include "ChoisePanel.h"
-#include "TopPanel.h"
 #include "BottomPanel.h"
+
+
+typedef struct _options {
+    int ppqn = DEFAULT_PPQN;
+    int time_signature_upper = 4;
+    int time_signature_lower_as_power_2 = 2;
+    int tempo = 120;
+
+    gchar* get_timesign_string();
+} options;
 
 struct params
 {
-  ChoisePanel *cp;
-  TopPanel *tp;
-  BottomPanel *bp;
+  ChoisePanel *center;
+  BottomPanel *bottom;
   void (*func)(gpointer);
   gpointer arg;
+  options *optns;
 };
 
 typedef struct _midi_event {
@@ -31,6 +44,8 @@ typedef struct _midi_event {
     uint32_t moment;
     uint8_t status_byte;
 
+    int vlq_size;
+
     _midi_event(uint8_t note, uint8_t velocity, uint32_t moment, uint8_t status_byte=SB_ON);
 } midi_event;
 
@@ -38,18 +53,18 @@ class Midi {
     midi_event *midi_start = nullptr;
     midi_event *midi_end = nullptr;
 
-    int preprocess_midi_chain(uint32_t time_0, int bpm, int ppqn);
+    int process_midi_chain_stage_1(uint32_t time_0, int bpm, int ppqn);
+    uint32_t process_midi_chain_stage_2(uint8_t *channels_map);
     void close_event(midi_event *event);
 
     uint32_t extract_moment(uint8_t* buf);
     uint32_t calc_abs_ticks(uint32_t delta_moment, int bpm, int ppqn);
     int ticks_to_vlq(uint8_t* buf, uint32_t ticks);
 
-    uint32_t save_temp_file(std::fstream&, uint8_t *channels_map);
     void write_mthd(std::fstream& fs, int ppqn);
-    void write_mtrk_hdr(std::fstream& fs, uint32_t len);
+    void write_mtrk_header(std::fstream& fs, uint32_t len);
     void write_tempo(std::fstream& fs, int bpm);
-    void copy_mtrk(std::fstream& tmp, std::fstream& midi);
+    void write_mtrk_body(std::fstream& midi);
     void write_end(std::fstream& fs);
 
 public:

@@ -19,27 +19,49 @@ void Midi::process(struct params *prms)
     if (!midi_start) return;
 
     uint32_t time_0 = midi_start->moment;
-    int bpm = prms->tp->get_tempo();
-    int ppqn = prms->tp->get_ppqn();
+    int bpm = prms->optns->tempo;
+    int ppqn = prms->optns->ppqn;
 
-    int channels_number = preprocess_midi_chain(time_0, bpm, ppqn);
+    int channels_number = process_midi_chain_stage_1(time_0, bpm, ppqn);
     uint8_t channels_map[channels_number];
-    prms->cp->get_notes_map(channels_map, channels_number);
+    prms->center->get_notes_map(channels_map, channels_number);
 
-    std::fstream fs_tmp(TMP_FILE_NAME, std::fstream::in | std::fstream::out | std::fstream::trunc);
-    uint32_t track_len = save_temp_file(fs_tmp, channels_map);
+    uint32_t track_len = process_midi_chain_stage_2(channels_map);
 
-    std::fstream fs_midi(prms->bp->get_file_name_with_path(), std::fstream::in | std::fstream::out | std::fstream::trunc);
+    std::fstream fs_midi(prms->bottom->get_file_name_with_path(), std::fstream::in | std::fstream::out | std::fstream::trunc);
 
     write_mthd(fs_midi, ppqn);
-    write_mtrk_hdr(fs_midi, TEMPO_LEN + track_len + END_LEN);
+    write_mtrk_header(fs_midi, TEMPO_LEN + track_len + END_LEN);
     write_tempo(fs_midi, bpm);
-    copy_mtrk(fs_tmp, fs_midi);
+    write_mtrk_body(fs_midi);
     write_end(fs_midi);
 
     fs_midi.close();
-    fs_tmp.close();
-    remove(TMP_FILE_NAME);
+}
+
+/**
+*   Processings midi-events one by one: turns absolute ticks into variable-length quantities;
+*   note indices into instrument codes.
+*   @returns Number of bytes in a track to be stored in a midi file.
+*/
+uint32_t Midi::process_midi_chain_stage_2(uint8_t *channels_map)
+{
+    uint32_t last_abs_ticks = 0;
+    uint32_t mtrk_len = 0;
+
+    midi_event *event = midi_start;
+    while (event)
+    {
+        uint32_t cur_abs_ticks = event->moment;
+        event->vlq_size = ticks_to_vlq((uint8_t*)&event->moment, cur_abs_ticks - last_abs_ticks);
+        last_abs_ticks = cur_abs_ticks;
+
+        event->note = channels_map[event->note];
+
+        mtrk_len += event->vlq_size + 3;
+        event = event->next;
+    }
+    return mtrk_len;
 }
 
 /**
@@ -47,7 +69,7 @@ void Midi::process(struct params *prms)
 *   into absolute ticks; counts the number of channels.
 *   @returns Number of channels in the record.
 */
-int Midi::preprocess_midi_chain(uint32_t time_0, int bpm, int ppqn)
+int Midi::process_midi_chain_stage_1(uint32_t time_0, int bpm, int ppqn)
 {
     uint8_t max_channel_number = 0;
     midi_event *current = midi_start;
@@ -135,33 +157,6 @@ int Midi::ticks_to_vlq(uint8_t* buf, uint32_t ticks)
     return count;
 }
 
-uint32_t Midi::save_temp_file(std::fstream& tmp_fs, uint8_t *channels_map)
-{
-    uint32_t last_abs_ticks = 0;
-    uint8_t delta_buf[4];
-    int delta_len;
-    uint32_t mtrk_len = 0;
-
-    midi_event *event = midi_start;
-    while (event)
-    {
-        delta_len = ticks_to_vlq(delta_buf, event->moment - last_abs_ticks);
-        last_abs_ticks = event->moment;
-        for (int i=4-delta_len; i<4; i++)
-        {
-            tmp_fs << delta_buf[i];
-            mtrk_len++;
-        }
-        tmp_fs << event->status_byte;
-        tmp_fs << channels_map[event->note];
-        tmp_fs << event->velocity;
-        mtrk_len += 3;
-
-        event = event->next;
-    }
-    return mtrk_len;
-}
-
 void Midi::write_mthd(std::fstream& fs, int ppqn)
 {
     uint8_t start[] = { 0x4d, 0x54, 0x68, 0x64,
@@ -176,7 +171,7 @@ void Midi::write_mthd(std::fstream& fs, int ppqn)
     fs << (uint8_t)ppqn;
 }
 
-void Midi::write_mtrk_hdr(std::fstream& fs, uint32_t len)
+void Midi::write_mtrk_header(std::fstream& fs, uint32_t len)
 {
     uint8_t hdr[] = { 0x4d, 0x54, 0x72, 0x6b };
     for (int i=0; i<4; i++)
@@ -199,15 +194,22 @@ void Midi::write_tempo(std::fstream& fs, int bpm)
         fs << (uint8_t) (tempo >> (i*8));
 }
 
-void Midi::copy_mtrk(std::fstream& tmp, std::fstream& midi)
+void Midi::write_mtrk_body(std::fstream& midi)
 {
-    int buf_size=1024;
-    char buf[buf_size];
-    tmp.seekg(0);
-    do {
-        tmp.read(buf, buf_size);
-        midi.write(buf, tmp.gcount());
-    } while (tmp.gcount()>0);
+    midi_event *event = midi_start;
+    while (event)
+    {
+        uint8_t *delta_buf = (uint8_t*) &event->moment;
+        for (int i=4-event->vlq_size; i<4; i++)
+        {
+            midi << delta_buf[i];
+        }
+        midi << event->status_byte;
+        midi << event->note;
+        midi << event->velocity;
+
+        event = event->next;
+    }
 }
 
 void Midi::write_end(std::fstream& fs)
@@ -217,4 +219,9 @@ void Midi::write_end(std::fstream& fs)
     {
         fs << ending[i];
     }
+}
+
+gchar* options::get_timesign_string()
+{
+    return g_strdup_printf("%d/%d", time_signature_upper, 1<<time_signature_lower_as_power_2);
 }

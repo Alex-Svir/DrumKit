@@ -1,10 +1,10 @@
 #include <iostream>
 #include <thread>
 #include <gtk/gtk.h>
+#include "Session.h"
 #include "TopPanel.h"
 #include "ChoisePanel.h"
 #include "BottomPanel.h"
-#include "Session.h"
 
 void gcallback_window_close(GtkWidget*, gpointer);
 void gcallback_button_rec(GtkWidget*, gpointer);
@@ -33,15 +33,17 @@ int main(int argc, char* argv[])
     gtk_container_add(GTK_CONTAINER(window), form);
 
     //  Panels' content
+    options optns;
+
     ChoisePanel center;
-    TopPanel top;
+    TopPanel top(&optns);
     BottomPanel bottom;
 
     //  Session parameters
     struct params prms;
     prms.center = &center;
-    prms.top = &top;
     prms.bottom = &bottom;
+    prms.optns = &optns;
 
     //  Top frame
     frame = gtk_frame_new(NULL);
