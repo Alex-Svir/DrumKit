@@ -151,39 +151,62 @@ int Midi::ticks_to_vlq(uint8_t* buf, uint32_t ticks)
 
 void Midi::write_mthd(std::fstream& fs, int ppqn)
 {
-    uint8_t start[] = { 0x4d, 0x54, 0x68, 0x64,
+    /*uint8_t start[] = { 0x4d, 0x54, 0x68, 0x64,
                         0x00, 0x00, 0x00, 0x06,
                         0x00, 0x00, 0x00, 0x01 };
     for (int i = 0; i < 12; i++)
     {
         fs << start[i];
-    }
+    }*/
+    char start[] = { 'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1 };
+    fs.write(start, 12);
+
     if (ppqn > 0x7fff) ppqn = 24576;
-    fs << (uint8_t)(ppqn >> 8);
-    fs << (uint8_t)ppqn;
+    //fs << (uint8_t)(ppqn >> 8);
+    //fs << (uint8_t)ppqn;
+    char *ppqn_ptr = (char*)&ppqn + 1;
+    fs << *ppqn_ptr;
+    fs << *(ppqn_ptr - 1);
 }
 
 void Midi::write_mtrk_header(std::fstream& fs, uint32_t len)
 {
-    uint8_t hdr[] = { 0x4d, 0x54, 0x72, 0x6b };
+    /*uint8_t hdr[] = { 0x4d, 0x54, 0x72, 0x6b };
     for (int i=0; i<4; i++)
-        fs << hdr[i];
+        fs << hdr[i];*/
 
+    char hdr[] = "MTrk";
+    fs.write(hdr, 4);
+
+    //for (int i=3; i>=0; i--)
+      //  fs << (uint8_t) (len >> (i*8));
+    char *len_ptr = (char*)&len;
     for (int i=3; i>=0; i--)
-        fs << (uint8_t) (len >> (i*8));
+        fs << *(len_ptr + i);
+
 }
 
 void Midi::write_tempo(std::fstream& fs, int bpm)
 {
-    uint8_t hdr[] = { 0x00, 0xff, 0x51, 0x03 };
+    /*uint8_t hdr[] = { 0x00, 0xff, 0x51, 0x03 };
     for (int i=0; i<4; i++)
-        fs << hdr[i];
+        fs << hdr[i];*/
+
+    //char hdr[] = { 0x00, 0xff, 0x51, 0x03 };
+    //fs.write(hdr, 4);
+    //  LITTLE ENDIAN
+    uint32_t hdr = 0x0351ff00;
+    fs.write( (char*)&hdr, 4 );
 
     uint32_t tempo = uint32_t(600000000) / uint32_t(bpm);
     tempo = tempo%10>4 ? tempo/10+1 : tempo/10;
 
+    //for (int i=2; i>=0; i--)
+    //    fs << (uint8_t) (tempo >> (i*8));
+    char* tempo_ptr = (char*)&tempo;
     for (int i=2; i>=0; i--)
-        fs << (uint8_t) (tempo >> (i*8));
+        fs << *(tempo_ptr + i);
+    //    fs << (uint8_t) (tempo >> (i*8));
 }
 
 void Midi::write_mtrk_body(std::fstream& midi)
@@ -191,11 +214,14 @@ void Midi::write_mtrk_body(std::fstream& midi)
     midi_event *event = midi_start;
     while (event)
     {
-        uint8_t *delta_buf = (uint8_t*) &event->moment;
+        /*uint8_t *delta_buf = (uint8_t*) &event->moment;
         for (int i=4-event->vlq_size; i<4; i++)
         {
             midi << delta_buf[i];
-        }
+        }*/
+        char *vlq = ((char*) &event->moment) + 4 - event->vlq_size;
+        midi.write(vlq, event->vlq_size);
+
         midi << event->status_byte;
         midi << event->note;
         midi << event->velocity;
@@ -206,11 +232,14 @@ void Midi::write_mtrk_body(std::fstream& midi)
 
 void Midi::write_end(std::fstream& fs)
 {
-    uint8_t ending[] = {0x00, 0xff, 0x2f, 0x00};
+    /*uint8_t ending[] = {0x00, 0xff, 0x2f, 0x00};
     for (int i=0; i<4; i++)
     {
         fs << ending[i];
-    }
+    }*/
+    //  LITTLE ENDIAN!!!!
+    uint32_t en = 0x002fff00;
+    fs.write( (char*)&en, 4 );
 }
 
 gchar* options::get_timesign_string()
