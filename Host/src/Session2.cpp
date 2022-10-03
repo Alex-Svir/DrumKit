@@ -60,7 +60,7 @@ midi::RawMidiRecord* sess::RecordSession::rec() {
         read_count = ifs.readsome(buffer, 6);
         if (read_count > 0)
         {
-            record->add((uint8_t*)buffer);
+            record->push((uint8_t*)buffer);
 
             if (read_count != 6) printf(">>>>>>>ERROR READING! READ %d BYTES!\n", read_count);
             else printf("Instr.: %d, Vel.: %3d\n", (uint8_t)buffer[0], (uint8_t)buffer[1]);
