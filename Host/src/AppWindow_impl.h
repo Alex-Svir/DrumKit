@@ -23,6 +23,7 @@ namespace appwin {
 
     void on_rec_session_started(void*);
     void on_rec_session_ended(void*);
+    gboolean on_rec_session_ended_handler(void*);
 
     std::string generate_timeshift_str(int,int);
 

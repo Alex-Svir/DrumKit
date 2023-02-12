@@ -4,6 +4,7 @@
 #include "ResInit.h"
 
 #include <fstream>
+#include <ctime>
 
 namespace appwin {
     const int WIN_WIDTH = 600;
@@ -234,21 +235,71 @@ void appwin::cb_show_menu(GtkWidget *widget, gpointer udata) {
 //==========================================================================================================================
 void appwin::on_rec_session_started(void*) {
     gtk_button_set_label(GTK_BUTTON(button_rec), "SAVE");
-    //g_main_context_invoke(NULL, set_button_recording_state, ptr);
-    //return FALSE;
 }
+
 void appwin::on_rec_session_ended(void *arg) {
+    g_main_context_invoke(NULL, on_rec_session_ended_handler, arg);
+}
+
+std::string generate_default_file_name() {
+    time_t tt = time(0);
+    tm *tnow = localtime(&tt);
+    char buf[25];
+    sprintf(buf, "%d_%02d_%02d_%02d_%02d_%02d.midi", tnow->tm_year + 1900,
+                                                tnow->tm_mon + 1,
+                                                tnow->tm_mday,
+                                                tnow->tm_hour,
+                                                tnow->tm_min,
+                                                tnow->tm_sec);
+    return buf;
+}
+
+void define_output_file_name(std::string& filename) {
+    GtkFileChooserNative *chooser_native = gtk_file_chooser_native_new("Save New File",
+                                                            NULL,
+                                                            GTK_FILE_CHOOSER_ACTION_SAVE,
+                                                            NULL,
+                                                            NULL);
+
+    GtkFileChooser *chooser = GTK_FILE_CHOOSER(chooser_native);
+    gtk_file_chooser_set_do_overwrite_confirmation(chooser, TRUE);
+
+    static std::string path;
+
+    if (path.empty())
+        gtk_file_chooser_set_current_name(chooser, generate_default_file_name().c_str());
+    else
+        gtk_file_chooser_set_filename(chooser, (path + generate_default_file_name()).c_str());
+
+    gint result = gtk_native_dialog_run(GTK_NATIVE_DIALOG(chooser_native));
+
+    if (result == GTK_RESPONSE_ACCEPT) {
+        gchar *dir = gtk_file_chooser_get_current_folder(chooser);
+        path = dir;
+        g_free(dir);
+        if (path.back() != '/') path.push_back('/');
+        filename = gtk_file_chooser_get_filename(chooser);
+    }
+
+    g_object_unref(chooser_native);
+}
+
+gboolean appwin::on_rec_session_ended_handler(void *arg) {
     midi::RawMidiRecord *record = (midi::RawMidiRecord*)arg;
     midi::MidiSong *song = midi::create_song(record, tempoSw->tempo(), ppqnSw->ppqn(), instrPanel->instrumentsMap());
     delete record;
 
     if (song) {
-        std::fstream fs_midi("/home/shurik/PROJECTS/DrumKit/Host/src/mimi.midi",
-                                std::fstream::in | std::fstream::out | std::fstream::trunc);
-        midi::write_song(fs_midi, song);
-        fs_midi.close();
+        std::string filename;
+        define_output_file_name(filename);
+        if (!filename.empty()) {
+            std::fstream fs_midi(filename, std::fstream::in | std::fstream::out | std::fstream::trunc);
+            midi::write_song(fs_midi, song);
+            fs_midi.close();
+        }
         delete song;
     }
+    return FALSE;
 }
 //==========================================================================================================================
 std::string appwin::generate_timeshift_str(int upper, int lower_pow2) {
