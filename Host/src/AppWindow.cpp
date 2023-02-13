@@ -1,6 +1,6 @@
 #include "AppWindow_impl.h"
 
-#include "Session2.h"
+#include "Session.h"
 #include "ResInit.h"
 
 #include <fstream>
@@ -244,8 +244,8 @@ void appwin::on_rec_session_ended(void *arg) {
 std::string generate_default_file_name() {
     time_t tt = time(0);
     tm *tnow = localtime(&tt);
-    char buf[25];
-    sprintf(buf, "%d_%02d_%02d_%02d_%02d_%02d.midi", tnow->tm_year + 1900,
+    char buf[21];
+    sprintf(buf, "%d%02d%02d_%02d%02d%02d.midi", tnow->tm_year + 1900,
                                                 tnow->tm_mon + 1,
                                                 tnow->tm_mday,
                                                 tnow->tm_hour,
@@ -266,10 +266,9 @@ void define_output_file_name(std::string& filename) {
 
     static std::string path;
 
-    if (path.empty())
-        gtk_file_chooser_set_current_name(chooser, generate_default_file_name().c_str());
-    else
-        gtk_file_chooser_set_filename(chooser, (path + generate_default_file_name()).c_str());
+    if (!path.empty())
+        gtk_file_chooser_set_current_folder(chooser, path.c_str());
+    gtk_file_chooser_set_current_name(chooser, generate_default_file_name().c_str());
 
     gint result = gtk_native_dialog_run(GTK_NATIVE_DIALOG(chooser_native));
 
@@ -277,8 +276,10 @@ void define_output_file_name(std::string& filename) {
         gchar *dir = gtk_file_chooser_get_current_folder(chooser);
         path = dir;
         g_free(dir);
-        if (path.back() != '/') path.push_back('/');
-        filename = gtk_file_chooser_get_filename(chooser);
+
+        dir = gtk_file_chooser_get_filename(chooser);
+        filename = dir;
+        g_free(dir);
     }
 
     g_object_unref(chooser_native);

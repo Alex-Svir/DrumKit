@@ -1,214 +1,194 @@
 #include "Midi.h"
 
-midi_event::_midi_event(uint8_t note, uint8_t velocity, uint32_t moment, uint8_t status_byte)
-                        : note(note), velocity(velocity/2), moment(moment), status_byte(status_byte) {}
+namespace midi {
+    const uint32_t NOTE_LENGTH = 50;
+    const int END_LEN = 4;
+    const int TEMPO_LEN = 7;
 
-Midi::~Midi()
-{
-    midi_event *current = midi_start, *del;
-    while (current)
-    {
-        del = current;
+    uint32_t calc_abs_ticks(uint32_t, int, int);
+    void close_event(midievent*);
+    int ticks_to_vlq(uint8_t*, uint32_t);
+
+    void write_mthd(std::ostream&, int);
+    void write_mtrk_header(std::ostream&, uint32_t);
+    void write_tempo(std::ostream&, int);
+    void write_mtrk_body(std::ostream&, midievent*);
+    void write_end(std::ostream&);
+}
+//-------------------------------------------------------------------------------------------------
+midi::RawMidiRecord::event::event(uint8_t *buffer) {
+    next = nullptr;
+    tmstmp = *(uint32_t*)(buffer + 2);
+    instr = buffer[0];
+    level = buffer[1];
+}
+
+void midi::RawMidiRecord::push(uint8_t *buffer) {
+    event *new_event = new event(buffer);
+    if (head) tail->next = new_event;
+    else head = new_event;
+    tail = new_event;
+}
+
+midi::RawMidiRecord::~RawMidiRecord() {
+    event *current = head;
+    while (current) {
+        event *ev = current;
         current = current->next;
-        delete del;
+        delete ev;
     }
 }
+//-------------------------------------------------------------------------------------------------
+midi::MidiSong::MidiSong(int bpm, int ppqn, midievent *head, int tracklen)
+        : track({head, tracklen}), meta({bpm, ppqn}) {}
 
-void Midi::process(struct params *prms)
-{
-    if (!midi_start) return;
-
-    uint32_t time_0 = midi_start->moment;
-    int bpm = prms->optns->tempo;
-    int ppqn = prms->optns->ppqn;
-
-    int channels_number = process_midi_chain_stage_1(time_0, bpm, ppqn);
-    uint8_t channels_map[channels_number];
-    prms->center->get_notes_map(channels_map, channels_number);
-
-    uint32_t track_len = process_midi_chain_stage_2(channels_map);
-
-    std::fstream fs_midi(prms->bottom->get_file_name_with_path(), std::fstream::in | std::fstream::out | std::fstream::trunc);
-
-    write_mthd(fs_midi, ppqn);
-    write_mtrk_header(fs_midi, TEMPO_LEN + track_len + END_LEN);
-    write_tempo(fs_midi, bpm);
-    write_mtrk_body(fs_midi);
-    write_end(fs_midi);
-
-    fs_midi.close();
+midi::MidiSong::~MidiSong() {
+    midievent *event = track.head;
+    while (event) {
+        midievent *ev = event;
+        event = event->next;
+        delete ev;
+    }
 }
+//-------------------------------------------------------------------------------------------------
+midi::midievent::midievent(uint32_t moment, uint8_t note, uint8_t vel, Status_Byte sb)
+        : next(nullptr), moment(moment), note(note), velocity(vel), status_byte(sb) {}
+//-------------------------------------------------------------------------------------------------
+midi::InstrumentsMap::InstrumentsMap(const InstrumentsMap& im) {
+    sz = im.sz;
+    instr = new uint8_t[sz];
+    for (size_t i = 0; i < sz; i++) instr[i] = im.instr[i];
+}
+midi::InstrumentsMap& midi::InstrumentsMap::operator=(const InstrumentsMap& im) {
+    if (sz != im.sz) {
+        delete[] instr;
+        instr = new uint8_t[sz = im.sz];
+    }
+    for (size_t i = 0; i < sz; i++) instr[i] = im.instr[i];
+    return *this;
+}
+//-------------------------------------------------------------------------------------------------
+midi::MidiSong* midi::create_song(RawMidiRecord *rec, int bpm, int ppqn, const InstrumentsMap& imap) {
+    RawMidiRecord::event *next_src = rec->head;
+    if (!next_src) return nullptr;////////////////////////////////////////////  or empty song?!?!?!?!
 
-/**
-*   Processings midi-events one by one: turns absolute ticks into variable-length quantities;
-*   note indices into instrument codes.
-*   @returns Number of bytes in a track to be stored in a midi file.
-*/
-uint32_t Midi::process_midi_chain_stage_2(uint8_t *channels_map)
-{
+    uint32_t time_0 = next_src->tmstmp;
+    midievent *mhead = nullptr;
+    midievent **next_dest = &mhead;
+    while (next_src) {
+        *next_dest = new midievent(
+            calc_abs_ticks(next_src->tmstmp - time_0, bpm, ppqn),
+            imap[next_src->instr],
+            next_src->level >> 1
+        );
+        next_src = next_src->next;
+        next_dest = &(*next_dest)->next;
+    }
+
+    int mtrk_body_len = 0;
     uint32_t last_abs_ticks = 0;
-    uint32_t mtrk_len = 0;
+    midievent *event = mhead;
+    while (event) {
+        close_event(event);
 
-    midi_event *event = midi_start;
-    while (event)
-    {
         uint32_t cur_abs_ticks = event->moment;
-        event->vlq_size = ticks_to_vlq((uint8_t*)&event->moment, cur_abs_ticks - last_abs_ticks);
+        event->vlq_sz = ticks_to_vlq((uint8_t*)&event->moment, cur_abs_ticks - last_abs_ticks);
         last_abs_ticks = cur_abs_ticks;
 
-        event->note = channels_map[event->note];
-
-        mtrk_len += event->vlq_size + 3;
+        mtrk_body_len += event->vlq_sz + 3;
         event = event->next;
     }
-    return mtrk_len;
+
+    return new MidiSong(bpm, ppqn, mhead, mtrk_body_len);
 }
 
-/**
-*   Processings midi-events one by one: adds closing event; turns absolute milliseconds
-*   into absolute ticks; counts the number of channels.
-*   @returns Number of channels in the record.
-*/
-int Midi::process_midi_chain_stage_1(uint32_t time_0, int bpm, int ppqn)
-{
-    uint8_t max_channel_number = 0;
-    midi_event *current = midi_start;
-
-    while (current)
-    {
-        close_event(current);
-        //  milliseconds => abs_ticks
-        current->moment = calc_abs_ticks(current->moment - time_0, bpm, ppqn);
-        if (current->note > max_channel_number)
-            max_channel_number = current->note;
-        current = current->next;
-    }
-    return (int)max_channel_number + 1;
+uint32_t midi::calc_abs_ticks(uint32_t delta_moment, int bpm, int ppqn) {
+    uint64_t res = (uint64_t)delta_moment * (uint64_t)bpm * (uint64_t)ppqn /6000;
+    return (uint32_t)(res%10 > 4 ? res/10 + 1 : res/10);
 }
 
 /**
 *   Adds a closing event in appropriate position.
 */
-void Midi::close_event(midi_event *event)
-{
-    if (event->status_byte == midi_event::SB_OFF) return;
+void midi::close_event(midievent *event) {
+    if (event->status_byte == midievent::SB_OFF) return;
 
     uint32_t new_time = event->moment + NOTE_LENGTH;
 
-    midi_event *iter = event;
-    while (iter->next && iter->next->moment <= new_time)
-    {
-        if (iter->next->note == event->note)
-        {
+    midievent *iter = event;
+    while (iter->next && iter->next->moment <= new_time) {
+        if (iter->next->note == event->note) {
             new_time = iter->next->moment;
             break;
         }
         iter = iter->next;
     }
-    midi_event *close_event = new midi_event(event->note, 0, new_time, midi_event::SB_OFF);
+    midievent *close_event = new midievent(new_time, event->note, 0, midievent::SB_OFF);
     close_event->next = iter->next;
     iter->next = close_event;
 }
 
-void Midi::add(uint8_t *buffer)
-{
-    midi_event *new_event = new midi_event(buffer[0], buffer[1], extract_moment(buffer));
-    if (midi_start) midi_end->next = new_event;
-    else midi_start = new_event;
-    midi_end = new_event;
-}
-
-uint32_t Midi::extract_moment(uint8_t* buf)
-{
-    return *(uint32_t*)(buf+2);
-}
-
-uint32_t Midi::calc_abs_ticks(uint32_t delta_moment, int bpm, int ppqn)
-{
-    uint64_t res = (uint64_t)delta_moment * (uint64_t)bpm * (uint64_t)ppqn /6000;
-    return (uint32_t)(res%10 > 4 ? res/10+1 : res/10);
-}
-
-int Midi::ticks_to_vlq(uint8_t* buf, uint32_t ticks)
-{
+int midi::ticks_to_vlq(uint8_t* buf, uint32_t ticks) {
     int count = 1;
-
-    for (;count<5;count++)
-    {
-        buf[4-count] = (uint8_t) ticks;
-        buf[4-count] |= 0x80;
-
-        if ( !(ticks >>= 7) )
-        {
-            break;
-        }
+    for (;count < 5; count++) {
+        buf[4 - count] = uint8_t(ticks) | 0x80;
+        if ( !(ticks >>= 7) ) break;
     }
     buf[3] &= (~0x80);
-
-    if (count > 4) return 4;
-    return count;
+    return (count > 4) ? 4 : count;
+}
+//-------------------------------------------------------------------------------------------------
+void midi::write_song(std::ostream& out, MidiSong* song) {
+    write_mthd(out, song->meta.ppqn);
+    write_mtrk_header(out, TEMPO_LEN + song->track.length + END_LEN);
+    write_tempo(out, song->meta.bpm);
+    write_mtrk_body(out, song->track.head);
+    write_end(out);
 }
 
-void Midi::write_mthd(std::fstream& fs, int ppqn)
-{
+void midi::write_mthd(std::ostream& out, int ppqn) {
     char start[] = { 'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1 };
-    fs.write(start, 12);
-
+    out.write(start, 12);
     if (ppqn > 0x7fff) ppqn = 24576;
-
     char *ppqn_ptr = (char*)&ppqn;
-    fs << *(ppqn_ptr + 1);
-    fs << *ppqn_ptr;
+    out << *(ppqn_ptr + 1);
+    out << *ppqn_ptr;
 }
 
-void Midi::write_mtrk_header(std::fstream& fs, uint32_t len)
-{
+void midi::write_mtrk_header(std::ostream& out, uint32_t len) {
     char hdr[] = "MTrk";
-    fs.write(hdr, 4);
-
+    out.write(hdr, 4);
     char *len_ptr = (char*)&len;
     for (int i=3; i>=0; i--)
-        fs << *(len_ptr + i);
+        out << *(len_ptr + i);
 }
 
-void Midi::write_tempo(std::fstream& fs, int bpm)
-{
+void midi::write_tempo(std::ostream& out, int bpm) {
     //  LITTLE ENDIAN
     uint32_t hdr = 0x0351ff00;
-    fs.write( (char*)&hdr, 4 );
-
+    out.write( (char*)&hdr, 4 );
     uint32_t tempo = uint32_t(600000000) / uint32_t(bpm);
-    tempo = tempo%10>4 ? tempo/10+1 : tempo/10;
-
+    tempo = tempo%10 > 4 ? tempo/10 + 1 : tempo/10;
     char* tempo_ptr = (char*)&tempo;
     for (int i=2; i>=0; i--)
-        fs << *(tempo_ptr + i);
+        out << *(tempo_ptr + i);
 }
 
-void Midi::write_mtrk_body(std::fstream& midi)
-{
-    midi_event *event = midi_start;
-    while (event)
-    {
-        char *vlq = ((char*) &event->moment) + 4 - event->vlq_size;
-        midi.write(vlq, event->vlq_size);
+void midi::write_mtrk_body(std::ostream& out, midievent *event) {
+    while (event) {
+        char *vlq = ((char*) &event->moment) + 4 - event->vlq_sz;
+        out.write(vlq, event->vlq_sz);
 
-        midi << event->status_byte;
-        midi << event->note;
-        midi << event->velocity;
+        out << event->status_byte;
+        out << event->note;
+        out << event->velocity;
 
         event = event->next;
     }
 }
 
-void Midi::write_end(std::fstream& fs)
-{
+void midi::write_end(std::ostream& out) {
     //  LITTLE ENDIAN!!!!
     uint32_t ending = 0x002fff00;
-    fs.write( (char*)&ending, 4 );
-}
-
-gchar* options::get_timesign_string()
-{
-    return g_strdup_printf("%d/%d", time_signature_upper, 1<<time_signature_lower_as_power_2);
+    out.write( (char*)&ending, 4 );
 }

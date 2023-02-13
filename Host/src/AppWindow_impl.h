@@ -2,7 +2,7 @@
 #define __APPWINDOW_IMPL__H__
 
 #include "AppWindow.h"
-#include "Midi2.h"
+#include "Midi.h"
 #include <vector>
 #include <gtk/gtk.h>
 

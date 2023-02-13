@@ -1,37 +1,41 @@
-#ifndef __SESSION__H__
-#define __SESSION__H__
-
-#include <iostream>
-#include <termios.h>
-#include <unistd.h>
+#ifndef __SESSION2__H__
+#define __SESSION2__H__
 #include <thread>
-#include <fcntl.h>
-#include <gtk/gtk.h>
+#include <string>
 #include "Midi.h"
 
-#define SEA 6
-#define SEB 0
+namespace sess {
+    class Session;
+    typedef void (*EndCallback)(void*);
+    typedef void (*StartCallback)(void*);
 
-class Session
-{
-    enum Status
-    {
-        DISCONNECTED,
-        CONNECTED,
-        DISCONNECTING
+    class Session {
+    protected:
+        enum Status {OFF, STARTING, ON, STOPPING};
+        Status status;
+        StartCallback scbck;
+        EndCallback ecbck;
+        bool ready_to_start() {return status == OFF;}
+        bool ready_to_stop() {return status == ON || status == STARTING;}
+        virtual bool do_stop() = 0;
+        virtual void routine() = 0;
+    public:
+        virtual ~Session() {}
+        bool start(StartCallback = nullptr);
+        bool stop(EndCallback = nullptr);
+    private:
+        static void do_start(Session* s) {s->routine();}
     };
-    Status status = DISCONNECTED;
-    struct termios oldset, newset;
-    struct params *prms;
 
-    void set_terminal_configuration(int filedescr);
-    void restore_terminal_configuration(int filedescr);
-    void rec();
-public:
-    void start(struct params *prms);
-    void stop();
-    bool ready_for_start();
-    bool ready_for_stop();
-};
+    class RecordSession : public Session {
+        std::string portname;
+        bool do_stop();
+        void routine();
+        midi::RawMidiRecord* rec();
+    public:
+        ~RecordSession() {stop();}
+        void port(const std::string& p) {portname = p;}
+    };
+}
 
 #endif

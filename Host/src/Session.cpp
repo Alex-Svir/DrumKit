@@ -1,56 +1,66 @@
 #include "Session.h"
 
+#include <iostream>
+#include <fstream>
+#include "ResInit.h"
 
-void Session::set_terminal_configuration(int filedescr)
-{
-    tcgetattr(filedescr, &oldset);
-    newset = oldset;
-
-    cfsetispeed(&newset, B115200);
-    cfsetospeed(&newset, B115200);
-
-    newset.c_cflag &= ~PARENB;
-    newset.c_cflag &= ~CSTOPB;
-    newset.c_cflag &= ~CSIZE;
-    newset.c_cflag |= CS8;
-    newset.c_cflag &= ~CRTSCTS;
-    newset.c_cflag |= CREAD | CLOCAL;
-
-    newset.c_iflag &= ~(IXON | IXOFF | IXANY | ICRNL);
-    newset.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG | IEXTEN | ECHOK | ECHOCTL | ECHOKE);
-    newset.c_oflag &= ~OPOST;
-
-    newset.c_cc[VMIN] = SEA;
-    newset.c_cc[VTIME] = SEB;
-    tcsetattr(filedescr, TCSANOW, &newset);
+bool sess::Session::start(StartCallback callback) {
+    if (!ready_to_start()) return false;
+    status = STARTING;
+    if (callback) scbck = callback;
+    std::thread th(do_start, this);
+    th.detach();
+    return true;
 }
 
-void Session::restore_terminal_configuration(int filedescr)
-{
-    tcsetattr(filedescr, TCSANOW, &oldset);
+bool sess::Session::stop(EndCallback callback) {
+    if (!ready_to_stop()) return false;
+    status = STOPPING;
+    if (callback) ecbck = callback;
+    return do_stop();
+}
+//===============================================================================================
+bool sess::RecordSession::do_stop() {
+    status = STOPPING;
+    return true;
 }
 
-void Session::rec()
-{
+void sess::RecordSession::routine() try {
+    std::cout << "Thread routine started\n";
+    resin::InputPort ip(portname);
+    resin::TerminalConfiguration termConfig(ip.fd());
+    status = ON;//////////////////////////////////////////////////////////////////////////^^^^^^^^^^^^vvvvvvvvvvvvvvvORDER???????????????????????
+    if (scbck) scbck(nullptr);///////////////////////////////////////////////////////////////////^^^^^^^^^^^^^^^^^^^^ORDER???????????????????????
+
+    midi::RawMidiRecord *record = rec();
+
+    if (ecbck) ecbck(record);
+    else delete record;
+    status = OFF;/////////////////////////////////////////////////////////////////////////^^^^^^^^^^^^vvvvvvvvvvvvvvvORDER???????????????????????
+    std::cout << "Thread routine stopped\n";
+} catch (resin::InputPort::PortUnavailable) {
+    std::cout << "\nError opening port \"" << portname << "\". It may be unplugged or busy\n\n";
+    status = OFF;
+}
+
+midi::RawMidiRecord* sess::RecordSession::rec() {
     std::cout << "Record started\n";
-
-    Midi midi;
+    midi::RawMidiRecord *record = new midi::RawMidiRecord();
+    //Midi midi;
     char buffer[6];
     int read_count;
-    std::ifstream ifs(prms->bottom->get_port_name());
+    std::ifstream ifs(portname);
     //  dump
-    do
-    {
+    do {
         read_count = ifs.readsome(buffer, 6);
-    }
-    while (read_count>0);
+    } while (read_count > 0);
 
-    while (status == CONNECTED)
+    while (status == ON)
     {
         read_count = ifs.readsome(buffer, 6);
         if (read_count > 0)
         {
-            midi.add((uint8_t*)buffer);
+            record->push((uint8_t*)buffer);
 
             if (read_count != 6) printf(">>>>>>>ERROR READING! READ %d BYTES!\n", read_count);
             else printf("Instr.: %d, Vel.: %3d\n", (uint8_t)buffer[0], (uint8_t)buffer[1]);
@@ -58,48 +68,6 @@ void Session::rec()
         }
     }
     ifs.close();
-    midi.process(prms);
-}
-
-void Session::start(struct params *prms)
-{
-    if (status != DISCONNECTED) return;
-    status = CONNECTED;
-    int fd = open (prms->bottom->get_port_name().c_str(), O_RDWR | O_NOCTTY);
-    if (fd == -1)
-    {
-        std::cout << "\nError opening port \"" << prms->bottom->get_port_name() << "\". It may be unplugged or busy\n\n";
-        status = DISCONNECTED;
-        return;
-    }
-
-    this->prms = prms;
-    if (prms->func != NULL && prms->arg != NULL) prms->func(prms->arg);
-    else std::cout << "Something is null in params" << std::endl;
-
-    set_terminal_configuration(fd);
-
-    rec();
-
-    restore_terminal_configuration(fd);
-    close(fd);
-
-    std::cout << "Session ended\n\n";
-    status = DISCONNECTED;
-}
-
-void Session::stop()
-{
-    if (status == CONNECTED)
-        status = DISCONNECTING;
-}
-
-bool Session::ready_for_start()
-{
-    return status == DISCONNECTED;
-}
-
-bool Session::ready_for_stop()
-{
-    return status == CONNECTED;
+    //midi.process(prms);
+    return record;
 }
